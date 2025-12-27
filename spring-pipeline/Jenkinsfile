@@ -5,51 +5,45 @@ pipeline {
 		maven 'maven3'
 	}
 
-	environment {
-		DOCKER_USER = 'hajarhaoud'
-		IMAGE_NAME = 'spring-app'
-		IMAGE_TAG = "${env.BUILD_NUMBER}"
-	}
-
 	stages {
-		stage('1. Checkout') {
+		stage('1. Diagnostic & Checkout') {
 			steps {
 				git branch: 'main', url: 'https://github.com/HajarHaoud/pipeline-spring.git'
+				sh 'echo "--- Voici les fichiers à la racine du dépôt ---"'
+				sh 'ls -F'
+				sh 'echo "--- Vérification du dossier spring-pipeline ---"'
+				sh 'ls -F spring-pipeline/ || echo "Le dossier spring-pipeline n\'existe pas à la racine"'
 			}
 		}
 
 		stage('2. Build Maven') {
 			steps {
-				// On entre dans le sous-dossier où se trouve le pom.xml
-				dir('spring-pipeline') {
-					sh 'mvn clean package -DskipTests'
-				}
-			}
-		}
-
-		stage('3. Build & Push Docker') {
-			steps {
 				script {
-					// On entre aussi dans le dossier où se trouve le Dockerfile
-					dir('spring-pipeline') {
-						withCredentials([usernamePassword(credentialsId: 'docker-hub-creds', passwordVariable: 'PASS', usernameVariable: 'USER')]) {
-							sh "docker build -t ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG} ."
-							sh "echo $PASS | docker login -u $USER --password-stdin"
-							sh "docker push ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
-							sh "docker push ${DOCKER_USER}/${IMAGE_NAME}:latest"
+					// On cherche dynamiquement où est le pom.xml
+					if (fileExists('pom.xml')) {
+						sh 'mvn clean package -DskipTests'
+					} else if (fileExists('spring-pipeline/pom.xml')) {
+						dir('spring-pipeline') {
+							sh 'mvn clean package -DskipTests'
 						}
+					} else {
+						error "Impossible de trouver le fichier pom.xml dans le projet !"
 					}
 				}
 			}
 		}
 
-		stage('4. Deploy to K8s') {
+		stage('3. Build Docker') {
 			steps {
-				// Si ton fichier deployment.yaml est AUSSI dans spring-pipeline
-				dir('spring-pipeline') {
-					withCredentials([file(credentialsId: 'k8s-config', variable: 'KUBECONFIG')]) {
-						sh "kubectl --kubeconfig=${KUBECONFIG} apply -f deployment.yaml"
-						sh "kubectl --kubeconfig=${KUBECONFIG} rollout restart deployment/spring-app"
+				script {
+					// On s'adapte aussi pour Docker
+					def projectDir = fileExists('pom.xml') ? "." : "spring-pipeline"
+					dir(projectDir) {
+						withCredentials([usernamePassword(credentialsId: 'docker-hub-creds', passwordVariable: 'PASS', usernameVariable: 'USER')]) {
+							sh "docker build -t hajarhaoud/spring-app:latest ."
+							sh "echo $PASS | docker login -u $USER --password-stdin"
+							sh "docker push hajarhaoud/spring-app:latest"
+						}
 					}
 				}
 			}
