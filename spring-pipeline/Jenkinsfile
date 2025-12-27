@@ -1,78 +1,43 @@
 pipeline {
 	agent any
 
-	tools {
-		maven 'maven3'
-	}
-
 	environment {
-		DOCKER_USER = 'hajarhaoud'
-		IMAGE_NAME = 'spring-app'
-		IMAGE_TAG = "${env.BUILD_NUMBER}"
+		DOCKER_IMAGE = "hajarhaoud/spring-app"
+		DOCKER_HUB_CREDS = 'docker-hub-credentials'
 	}
 
 	stages {
-
-		stage('1. Checkout et Diagnostic') {
+		stage('Checkout Code') {
 			steps {
-				cleanWs()
 				git branch: 'main', url: 'https://github.com/HajarHaoud/pipeline-spring.git'
-
-				sh '''
-                    echo "=== ARBORESCENCE COMPLÈTE ==="
-                    find . -type f -name "*.xml" -o -name "*.java" | head -30
-                    echo "=== ls -la racine ==="
-                    ls -la
-                    echo "=== ls -la spring-pipeline/ si existe ==="
-                    ls -la spring-pipeline/ 2>/dev/null || echo "spring-pipeline/ n'existe pas"
-                    echo "=== Recherche pom.xml partout ==="
-                    find . -name "pom.xml" 2>/dev/null
-                '''
 			}
 		}
 
-		stage('2. Build Maven') {
+		stage('Build Artifact') {
+			steps {
+				dir('spring-pipeline'){
+					sh 'mvn clean package -DskipTests'
+				}
+			}
+		}
+
+		stage('Build & Push Docker Image') {
 			steps {
 				script {
-					// Chercher dynamiquement où est le pom.xml
-					def pomPath = sh(script: 'find . -name "pom.xml" | head -1', returnStdout: true).trim()
-
-					if (pomPath) {
-						echo "📁 pom.xml trouvé à : ${pomPath}"
-						def projectDir = new File(pomPath).parent
-						dir(projectDir) {
-							sh 'pwd'
-							sh 'mvn clean package -DskipTests'
-						}
-					} else {
-						error "❌ Aucun pom.xml trouvé dans le workspace"
+					docker.withRegistry('', DOCKER_HUB_CREDS) {
+						def customImage = docker.build("${DOCKER_IMAGE}:${env.BUILD_ID}")
+						customImage.push()
+						customImage.push('latest')
 					}
 				}
 			}
 		}
 
-		stage('3. Build Docker') {
+		stage('Deploy to K8s') {
 			steps {
-				dir('spring-pipeline') {  // ← Pareil pour Docker
-					withCredentials([usernamePassword(credentialsId: 'docker-hub-creds', passwordVariable: 'PASS', usernameVariable: 'USER')]) {
-						sh 'docker build -t hajarhaoud/spring-app:latest .'
-						sh "echo $PASS | docker login -u $USER --password-stdin"
-						sh 'docker push hajarhaoud/spring-app:latest'
-					}
-				}
-			}
-		}
-
-
-		stage('4. Deploy to K8s') {
-			steps {
-				// Si ton fichier deployment.yaml est AUSSI dans spring-pipeline
-				dir('spring-pipeline') {
-					withCredentials([file(credentialsId: 'k8s-config', variable: 'KUBECONFIG')]) {
-						sh "kubectl --kubeconfig=${KUBECONFIG} apply -f deployment.yaml"
-						sh "kubectl --kubeconfig=${KUBECONFIG} rollout restart deployment/spring-app"
-					}
-				}
+				// On utilise kubectl pour mettre à jour l'image
+				sh "kubectl apply -f k8s/deployment.yaml"
+				sh "kubectl set image deployment/spring-app spring-app=${DOCKER_IMAGE}:${env.BUILD_ID}"
 			}
 		}
 	}
