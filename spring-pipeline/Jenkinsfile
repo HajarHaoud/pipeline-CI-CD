@@ -23,11 +23,13 @@ pipeline {
 
 		stage('Build & Push Docker Image') {
 			steps {
-				script {
-					docker.withRegistry('', DOCKER_HUB_CREDS) {
-						def customImage = docker.build("${DOCKER_IMAGE}:${env.BUILD_ID}")
-						customImage.push()
-						customImage.push('latest')
+				dir('sprin-pipeline'){
+					script {
+						docker.withRegistry('', DOCKER_HUB_CREDS) {
+							def customImage = docker.build("${DOCKER_IMAGE}:${env.BUILD_ID}")
+							customImage.push()
+							customImage.push('latest')
+						}
 					}
 				}
 			}
@@ -35,9 +37,12 @@ pipeline {
 
 		stage('Deploy to K8s') {
 			steps {
-				// On utilise kubectl pour mettre à jour l'image
-				sh "kubectl apply -f k8s/deployment.yaml"
-				sh "kubectl set image deployment/spring-app spring-app=${DOCKER_IMAGE}:${env.BUILD_ID}"
+				dir('spring-pipeline'){
+					// On utilise kubectl pour mettre à jour l'image
+					sh "kubectl apply -f k8s/deployment.yaml"
+					sh "kubectl set image deployment/spring-app spring-app=${DOCKER_IMAGE}:${env.BUILD_ID}"
+				}
+
 			}
 		}
 	}
