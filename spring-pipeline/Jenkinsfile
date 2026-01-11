@@ -1,46 +1,34 @@
 pipeline {
 	agent any
 
-	environment {
-		DOCKER_IMAGE = "hajarhaoud/spring-app"
-		DOCKER_HUB_CREDS = 'dockerhub-creds'
-	}
-
 	stages {
 		stage('Checkout Code') {
 			steps {
-				git branch: 'main', url: 'https://github.com/HajarHaoud/pipeline-spring.git'
+				git 'https://github.com/HajarHaoud/pipeline-CI-CD.git'
 			}
 		}
 
-		stage('Build Artifact') {
+		stage('Build & Test') {
 			steps {
-				dir('spring-pipeline'){
-					sh 'mvn clean package -DskipTests'
-				}
+				// On utilise Docker pour builder afin d'éviter d'installer Maven sur Jenkins
+				sh 'mvn clean test'
 			}
 		}
 
-		stage('3. Build & Push Docker') {
+		stage('Build Docker Image') {
 			steps {
-				dir('spring-pipeline') {
-					script {
-						// Juste build pour tester
-						sh 'docker build -t test-image .'
-						echo "✅ Build Docker réussi (push désactivé pour test)"
-					}
-				}
+				sh 'docker build -t mon-app-spring .'
 			}
 		}
 
-		stage('Deploy to K8s') {
+		stage('Run Application') {
 			steps {
-				dir('spring-pipeline'){
-					// On utilise kubectl pour mettre à jour l'image
-					sh "kubectl apply -f k8s/deployment.yaml"
-					sh "kubectl set image deployment/spring-app spring-app=${DOCKER_IMAGE}:${env.BUILD_ID}"
-				}
-
+				// On arrête l'ancien conteneur s'il existe et on lance le nouveau
+				sh '''
+                docker stop mon-app-container || true
+                docker rm mon-app-container || true
+                docker run -d -p 8081:8080 --name mon-app-container mon-app-spring
+                '''
 			}
 		}
 	}
