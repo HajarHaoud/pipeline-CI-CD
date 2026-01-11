@@ -10,23 +10,12 @@ pipeline {
 
 		stage('Build & Test') {
 			steps {
-				dir('spring-pipeline'){
-					sh 'chmod +x mvnw'
-					// On utilise Docker pour builder afin d'éviter d'installer Maven sur Jenkins
-					sh './mvnw clean package -DskipTests'
-				}
+				// On utilise Docker pour builder afin d'éviter d'installer Maven sur Jenkins
+				sh 'mvn clean package -DskipTests'
+
 			}
 		}
 
-		stage('Vérification JAR') {
-			steps {
-				dir('spring-pipeline') {
-					// On vérifie que le fichier .jar a bien été créé
-					sh 'ls -l target/'
-					echo "BRAVO ! Le build Maven est réussi."
-				}
-			}
-		}
 
 		stage('Build Docker Image') {
 			steps {
